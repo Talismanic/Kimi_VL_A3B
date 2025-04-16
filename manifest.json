@@ -4,7 +4,7 @@
     "models": [
         {
             "base_name": "moonshotai/Kimi-VL-A3B-Instruct",
-            "base_filename":"moonshotai/Kimi-VL-A3B-Instruct",
+            "base_filename":"Kimi-VL-A3B-Instruct",
             "author": "Moonshot AI",
             "license": "MIT license",
             "source": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Instruct",
@@ -30,7 +30,7 @@
         },
         {
             "base_name": "moonshotai/Kimi-VL-A3B-Thinking",
-            "base_filename":"moonshotai/Kimi-VL-A3B-Thinking",
+            "base_filename":"Kimi-VL-A3B-Thinking",
             "author": "Moonshot AI",
             "license": "MIT license",
             "source": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Thinking",
