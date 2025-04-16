@@ -201,13 +201,13 @@ class KimiVLModel(SamplesMixin, Model):
         self.model_path = model_path
         self._custom_system_prompt = system_prompt  # Store custom system prompt if provided
         self._operation = operation
-        self.prompt = prompt + "\n<instruction>"
+        self.prompt = prompt
         
         self.device = get_device()
         logger.info(f"Using device: {self.device}")
 
         # Set dtype for CUDA devices
-        self.torch_dtype = torch.bfloat16 if self.device in ["cuda", "mps"] else None
+        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else None
         # Load model and processor
         logger.info(f"Loading model from {model_path}")
 
@@ -304,19 +304,26 @@ class KimiVLModel(SamplesMixin, Model):
             logger.debug(f"Failed to parse JSON: {s[:200]}")
             return None
 
-    def _to_detections(self, boxes: List[Dict]) -> fo.Detections:
-        """Convert bounding boxes to FiftyOne Detections.
+    def _to_detections(
+        self, 
+        boxes: List[Dict], 
+        image_width: int, 
+        image_height: int, 
+        image_grid_thw: torch.Tensor = None, 
+        patch_size: int = 14
+    ) -> fo.Detections:
+        """
+        Convert Kimi's bounding boxes to FiftyOne Detections.
         
-        Takes a list of bounding box dictionaries and converts them to FiftyOne Detection 
-        objects. Expects coordinates to already be normalized to [0,1] range.
-
         Args:
-            boxes: List of dictionaries or single dictionary containing bounding box info.
-                Each box should have:
-                - 'bbox_2d' or 'bbox': List of [x,y,w,h] coordinates in [0,1] range
-                - 'label': Optional string label (defaults to "object")
+            boxes: List of dictionaries containing bounding box info
+            image_width: Width of the original image in pixels
+            image_height: Height of the original image in pixels
+            image_grid_thw: Optional tensor with processed image grid dimensions
+            patch_size: Size of each patch (default 14)
+        
         Returns:
-            fo.Detections object containing the detection annotations
+            fo.Detections object with normalized coordinates
         """
         detections = []
         
@@ -334,50 +341,76 @@ class KimiVLModel(SamplesMixin, Model):
                 if not bbox:
                     continue
                 
-                # Create Detection object with coordinates (already normalized)
+                # If image_grid_thw is provided, convert normalized coords to pixel coords
+                if image_grid_thw is not None:
+                    # Extract grid dimensions (THW order)
+                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
+                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
+                    
+                    # Convert normalized coordinates to pixel coordinates
+                    x1 = bbox[0] * proc_width
+                    y1 = bbox[1] * proc_height
+                    x2 = bbox[2] * proc_width
+                    y2 = bbox[3] * proc_height
+                    
+                    # Update bbox to pixel coordinates for conversion
+                    bbox = [x1, y1, x2, y2]
+                
+                # Convert pixel coordinates to normalized [0,1] coordinates
+                x1, y1, x2, y2 = map(float, bbox)
+                x = x1 / image_width  # Normalized left x
+                y = y1 / image_height # Normalized top y
+                w = (x2 - x1) / image_width  # Normalized width
+                h = (y2 - y1) / image_height # Normalized height
+                
+                # Create Detection object with normalized coordinates
                 detection = fo.Detection(
                     label=str(box.get("label", "object")),
-                    bounding_box=bbox,
+                    bounding_box=[x, y, w, h],
                 )
                 detections.append(detection)
                 
             except Exception as e:
-                logger.debug(f"Error processing box {box}: {e}")
+                # Optionally log errors
+                print(f"Error processing box {box}: {e}")
                 continue
                 
         return fo.Detections(detections=detections)
 
-    def _to_ocr_detections(self, boxes: List[Dict]) -> fo.Detections:
+    def _to_ocr_detections(
+        self, 
+        boxes: List[Dict], 
+        image_width: int, 
+        image_height: int, 
+        image_grid_thw: torch.Tensor = None, 
+        patch_size: int = 14
+    ) -> fo.Detections:
         """Convert OCR results to FiftyOne Detections.
         
-        Takes a list of OCR result dictionaries and converts them to FiftyOne Detection
-        objects. Expects coordinates to already be normalized to [0,1] range.
-
         Args:
-            boxes: List of dictionaries containing OCR detection info.
-                Each box should have:
-                - 'bbox': List of [x,y,w,h] coordinates in [0,1] range
-                - 'text': The actual text content
-                - 'text_type': Type of text (e.g. heading, paragraph)
-
+            boxes: List of dictionaries containing OCR detection info
+            image_width: Width of the original image in pixels
+            image_height: Height of the original image in pixels
+            image_grid_thw: Optional tensor with processed image grid dimensions
+            patch_size: Size of each patch (default 14)
+            
         Returns:
             fo.Detections object containing the OCR annotations with text content
         """
-        # Initialize empty list to store the detection objects
         detections = []
         
-        # If input is a dict, try to extract a list value, otherwise use the dict itself
+        # Handle case where boxes is a dictionary - extract list value if present
         if isinstance(boxes, dict):
             boxes = next((v for v in boxes.values() if isinstance(v, list)), boxes)
         
-        # Convert single box to list for consistent processing
+        # Ensure boxes is a list, even for single box input
         boxes = boxes if isinstance(boxes, list) else [boxes]
         
         # Process each OCR box
         for box in boxes:
             try:
                 # Extract the bounding box coordinates and text content
-                bbox = box.get('bbox')  # [x,y,w,h] coordinates
+                bbox = box.get('bbox')  # [x1,y1,x2,y2] coordinates
                 text = box.get('text')  # The actual text string
                 text_type = box.get('text_type', 'text')  # Type of text, defaults to 'text'
                 
@@ -385,17 +418,34 @@ class KimiVLModel(SamplesMixin, Model):
                 if not bbox or not text:
                     continue
                 
-                # Create a FiftyOne Detection object with the OCR data
-                # - label is the text_type (e.g. "heading", "paragraph")
-                # - bounding_box contains the normalized coordinates
-                # - text field stores the actual text content
+                # If image_grid_thw is provided, convert normalized coords to pixel coords
+                if image_grid_thw is not None:
+                    # Extract grid dimensions (THW order)
+                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
+                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
+                    
+                    # Convert normalized coordinates to pixel coordinates
+                    x1 = bbox[0] * proc_width
+                    y1 = bbox[1] * proc_height
+                    x2 = bbox[2] * proc_width
+                    y2 = bbox[3] * proc_height
+                    
+                    # Update bbox to pixel coordinates for conversion
+                    bbox = [x1, y1, x2, y2]
+                
+                # Convert pixel coordinates to normalized [0,1] coordinates
+                x1, y1, x2, y2 = map(float, bbox)
+                x = x1 / image_width  # Normalized left x
+                y = y1 / image_height # Normalized top y
+                w = (x2 - x1) / image_width  # Normalized width
+                h = (y2 - y1) / image_height # Normalized height
+                
+                # Create Detection object with normalized coordinates
                 detection = fo.Detection(
                     label=str(text_type),
-                    bounding_box=bbox,
+                    bounding_box=[x, y, w, h],
                     text=str(text),
                 )
-                
-                # Add the detection to our collection
                 detections.append(detection)
                 
             except Exception as e:
@@ -515,7 +565,7 @@ class KimiVLModel(SamplesMixin, Model):
         if sample is not None and self._get_field() is not None:
             field_value = sample.get_field(self._get_field())
             if field_value is not None:
-                self.prompt = str(field_value) + "\n<instruction>"
+                self.prompt = str(field_value)
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -541,7 +591,7 @@ class KimiVLModel(SamplesMixin, Model):
             return_tensors="pt").to(self.device)
         
         # Set recommended temperature based on model type per the model card
-        temperature = 0.2 if self.model_path == "moonshotai/Kimi-VL-A3B-Instruct" else 0.7 if self.model_path == "moonshotai/Kimi-VL-A3B-Thinking" else 0.6
+        temperature = 0.2 if self.model_path == "moonshotai/Kimi-VL-A3B-Instruct" else 0.6
         
         with torch.no_grad():
             generated_ids = self.model.generate(
@@ -568,13 +618,24 @@ class KimiVLModel(SamplesMixin, Model):
             return None
 
         if self.operation == "detect":
-            return self._to_detections(parsed_output)
+            return self._to_detections(
+                parsed_output, 
+                image_width=sample.metadata.width, 
+                image_height=sample.metadata.height,
+                image_grid_thw=inputs['image_grid_hws']
+                )
+        
         elif self.operation == "point":
             return self._to_keypoints(parsed_output)
         elif self.operation == "classify":
             return self._to_classifications(parsed_output)
         elif self.operation == "ocr":
-            return self._to_ocr_detections(parsed_output)
+            return self._to_ocr_detections(
+                parsed_output, 
+                image_width=sample.metadata.width, 
+                image_height=sample.metadata.height,
+                image_grid_thw=inputs['image_grid_hws']
+                )
 
     def predict(self, image, sample=None):
         """Process an image with the model.
