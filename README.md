@@ -1,189 +1,138 @@
-# Qwen2.5-VL FiftyOne Remote Model Zoo Implementation
-Implementing Qwen2.5-VL as a Remote Zoo Model for FiftyOne
+# Kimi-VL-A3B FiftyOne Zoo Model
 
-> NOTE: Due to recent changes in Transformers 4.50.0 (which are to be patched by Hugging Face) please ensure you have transformers<=4.49.0 installed before running the model
+This repository provides a FiftyOne Zoo Model integration for the Kimi-VL-A3B multimodal model, enabling various vision-language tasks through a simple interface.
 
 ## Features
 
-Based on the documentation, here's a comprehensive primer on the tasks supported by Qwen2.5-VL:
+The model supports multiple operations:
 
-# Qwen2.5-VL Supported Tasks
+- **Visual Question Answering (VQA)**: Get natural language answers to questions about images
+- **Object Detection**: Locate and identify objects, UI elements, and regions of interest
+- **OCR**: Detect and extract text from images with bounding boxes and text type classification
+- **Keypoint Detection**: Identify precise locations of specific points of interest
+- **Classification**: Generate multiple relevant classifications for image content
+- **Agentic**: Generate PyAutoGUI code for UI automation based on visual content
 
-1. **Visual Question Answering (VQA)**
-   - Answers natural language questions about images
-   - Returns text responses in English
-   - Can be used for general image understanding and description
+## Important Notes and Limitations
 
-2. **Object Detection**
-   - Locates and identifies objects in images
-   - Returns normalized bounding box coordinates and object labels
-   - Can be prompted to find specific types of objects
+### Object Detection Functionality
 
-3. **Optical Character Recognition (OCR)**
-   - Reads and extracts text from images
-   - Particularly useful for documents, signs, and text-containing images
+This model is not designed or optimized for traditional object detection tasks - that is, identifying and localizing objects within images by outputting bounding boxes and class labels. 
 
-4. **Keypoint Detection**
-   - Identifies specific points of interest in images
-   - Returns normalized point coordinates with labels
-   - Useful for pose estimation and landmark detection
+While the model can engage in visual reasoning and answer questions about image content, it does not natively output bounding boxes or segmentation masks for objects. There is no evidence in the technical documentation, model cards, or reports of the model supporting standard object detection benchmarks or providing APIs specifically for returning precise object locations.
 
-5. **Image Classification**
-   - Categorizes images into predefined classes
-   - Can identify image quality issues
-   - Returns classification labels
+Your results may vary significantly when using this model for tasks requiring accurate bounding box predictions.
 
-## Advanced Grounded Operations
+### Forward Compatibility
 
-The model also supports two sophisticated grounded operations that build upon VQA results:
-
-1. **Grounded Detection**
-   - Links textual descriptions with specific object locations
-   - Returns detection boxes grounded in the VQA response
-
-2. **Grounded Pointing**
-   - Associates text descriptions with specific points in the image
-   - Returns keypoints grounded in the VQA response
-
-The model is highly flexible, allowing you to switch between these tasks by simply changing the operation mode and prompt, making it a versatile tool for various computer vision and multimodal applications.
-
-
-## Technical Details
-
-The model implementation:
-- Supports multiple devices (CUDA, MPS, CPU)
-- Uses bfloat16 precision on CUDA devices for optimal performance
-- Handles various output formats including JSON parsing and coordinate normalization
-- Provides comprehensive system prompts for each operation type
-- Converts outputs to FiftyOne-compatible formats (Detections, Keypoints, Classifications)
+The object detection functionality has been included in this FiftyOne Zoo implementation as a forward-looking feature. As future versions of the Kimi-VL model potentially add support for precise object detection and localization, this integration will make it seamless to upgrade without requiring significant changes to the codebase or API. This architectural decision allows for easy updates when enhanced detection capabilities become available in future model releases.
 
 
 ## Installation
 
-```bash
-# Register the model source
-foz.register_zoo_model_source("https://github.com/harpreetsahota204/qwen2_5_vl")
+1. Register the zoo model source:
+```python
+import fiftyone.zoo as foz
+foz.register_zoo_model_source("https://github.com/harpreetsahota204/Kimi_VL_A3B", overwrite=True)
+```
 
-# Download the model
+2. Download the model (choose one):
+```python
+# For the Instruct model
 foz.download_zoo_model(
-    "https://github.com/harpreetsahota204/qwen2_5_vl",
-    model_name="Qwen/Qwen2.5-VL-3B-Instruct"
+    "https://github.com/harpreetsahota204/Kimi_VL_A3B",
+    model_name="moonshotai/Kimi-VL-A3B-Instruct"
+)
+
+# Or for the Thinking model
+foz.download_zoo_model(
+    "https://github.com/harpreetsahota204/Kimi_VL_A3B",
+    model_name="moonshotai/Kimi-VL-A3B-Thinking"
 )
 ```
 
-## Usage Examples
-
-## Loading the model
-
+3. Load the model:
 ```python
 model = foz.load_zoo_model(
-    "Qwen/Qwen2.5-VL-3B-Instruct",
-    # install_requirements=True #if you are using for the first time and need to download reuirement,
-    # ensure_requirements=True #  ensure any requirements are installed before loading the model
-)
+   "moonshotai/Kimi-VL-A3B-Instruct",
+   # install_requirements=True #if you are using for the first time and need to download reuirement,
+   # ensure_requirements=True #  ensure any requirements are installed before loading the model
+   )
 ```
 
-#### Available Checkpoints
+## Usage
 
-These checkpoints come in different sizes (3B, 7B, 32B, and 72B parameters) and each size has two variants:
-
-- Regular version (with `-Instruct` suffix)
-- AWQ quantized version (with `-Instruct-AWQ` suffix)
-
-1. `Qwen/Qwen2.5-VL-3B-Instruct`
-2. `Qwen/Qwen2.5-VL-3B-Instruct-AWQ`
-3. `Qwen/Qwen2.5-VL-7B-Instruct`
-4. `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`
-5. `Qwen/Qwen2.5-VL-32B-Instruct`
-6. `Qwen/Qwen2.5-VL-32B-Instruct-AWQ`
-7. `Qwen/Qwen2.5-VL-72B-Instruct`
-8. `Qwen/Qwen2.5-VL-72B-Instruct-AWQ`
-
-The AWQ versions require an additional package `autoawq==0.2.7.post3` but offer a more memory-efficient alternative to the regular versions while maintaining performance.
-
-## Switching Between Operations
-
-The same model instance can be used for different operations by simply changing its properties:
-
-#### Visual Question Answering
+### Visual Question Answering
 ```python
-
-model.operation="vqa"
-model.prompt="List all objects in this image seperated by commas
-
-dataset.apply_model(model, label_field="q_vqa")
+model.operation = "vqa"
+model.prompt = "Describe this screenshot and what the user might be doing in it."
+dataset.apply_model(model, label_field="vqa_results")
 ```
-#### Object Detection
+
+### Object Detection
 ```python
 model.operation = "detect"
-model.prompt = "Locate the objects in this image."
-dataset.apply_model(model, label_field="qdets")
+model.prompt = "Locate the elements of this UI that a user can interact with."
+dataset.apply_model(model, label_field="detections")
 ```
 
-#### OCR with Detection
+### OCR
 ```python
+model.operation = "ocr"
 model.prompt = "Read all the text in the image."
-dataset.apply_model(model, label_field="q_ocr")
+dataset.apply_model(model, label_field="ocr_results")
 ```
 
-#### Keypoint Detection
+### Keypoint Detection
 ```python
 model.operation = "point"
-model.prompt = "Detect the keypoints in the image."
-dataset.apply_model(model, label_field="qpts")
+model.prompt = "Point to all the interactive elements in UI."
+dataset.apply_model(model, label_field="keypoints")
 ```
 
-#### Image Classification
-
+### Classification
 ```python
 model.operation = "classify"
-model.prompt = "List the potential image quality issues in this image."
-dataset.apply_model(model, label_field="q_cls")
+model.prompt = "List the type of operating system, open application, and what the user is working on."
+dataset.apply_model(model, label_field="classifications")
 ```
 
-### Grounded Operations
-The model also supports grounded detection and pointing by using results from VQA:
-
+### Agentic (UI Automation)
 ```python
-# Grounded Detection
-dataset.apply_model(model, label_field="grounded_qdets", prompt_field="q_vqa")
-
-# Grounded Pointing
-dataset.apply_model(model, label_field="grounded_qpts", prompt_field="q_vqa")
+model.operation = "agentic"
+model.prompt = "Write code to close application windows and quit the application."
+dataset.apply_model(model, label_field="automation_code")
 ```
 
-Please refer to the [example notebook](using_qwen2.5-vl_as_zoo_model.ipynb) for more details 
+### Using Sample Fields as Input
+You can also use fields from your dataset samples as prompts:
+```python
+dataset.apply_model(model, label_field="results", prompt_field="instruction")
+```
 
-## Output Formats
+## Model Details
 
-Each operation returns results in a specific format:
+- The model automatically selects the best available device (CUDA, MPS, or CPU)
+- For CUDA and mps devices, it uses `bfloat16` precision for optimal performance
+- Temperature settings:
+  - Kimi-VL-A3B-Instruct: 0.2
+  - Kimi-VL-A3B-Thinking: 0.6
 
-- **VQA (Visual Question Answering)**: Returns `str`
-  - Natural language text responses in English
-  
-- **Detection**: Returns `fiftyone.core.labels.Detections`
-  - Normalized bounding box coordinates [0,1] x [0,1]
-  - Object labels
-  
-- **Keypoint Detection**: Returns `fiftyone.core.labels.Keypoints`
-  - Normalized point coordinates [0,1] x [0,1]
-  - Point labels
-  
-- **Classification**: Returns `fiftyone.core.labels.Classifications`
-  - Class labels
-  
-- **Grounded Operations**: Returns same format as base operation
-  - Grounded Detection: `fiftyone.core.labels.Detections`
-  - Grounded Pointing: `fiftyone.core.labels.Keypoints`
 
+## License
+
+The model is released under MIT License
 
 ## Citation
 
 ```bibtex
-@article{Qwen2.5-VL,
-  title={Qwen2.5-VL Technical Report},
-  author={Bai, Shuai and Chen, Keqin and Liu, Xuejing and Wang, Jialin and Ge, Wenbin and Song, Sibo and Dang, Kai and Wang, Peng and Wang, Shijie and Tang, Jun and Zhong, Humen and Zhu, Yuanzhi and Yang, Mingkun and Li, Zhaohai and Wan, Jianqiang and Wang, Pengfei and Ding, Wei and Fu, Zheren and Xu, Yiheng and Ye, Jiabo and Zhang, Xi and Xie, Tianbao and Cheng, Zesen and Zhang, Hang and Yang, Zhibo and Xu, Haiyang and Lin, Junyang},
-  journal={arXiv preprint arXiv:2502.13923},
-  year={2025}
+@misc{kimiteam2025kimivltechnicalreport,
+      title={{Kimi-VL} Technical Report}, 
+      author={Kimi Team and Angang Du and Bohong Yin and Bowei Xing and Bowen Qu and Bowen Wang and Cheng Chen and Chenlin Zhang and Chenzhuang Du and Chu Wei and Congcong Wang and Dehao Zhang and Dikang Du and Dongliang Wang and Enming Yuan and Enzhe Lu and Fang Li and Flood Sung and Guangda Wei and Guokun Lai and Han Zhu and Hao Ding and Hao Hu and Hao Yang and Hao Zhang and Haoning Wu and Haotian Yao and Haoyu Lu and Heng Wang and Hongcheng Gao and Huabin Zheng and Jiaming Li and Jianlin Su and Jianzhou Wang and Jiaqi Deng and Jiezhong Qiu and Jin Xie and Jinhong Wang and Jingyuan Liu and Junjie Yan and Kun Ouyang and Liang Chen and Lin Sui and Longhui Yu and Mengfan Dong and Mengnan Dong and Nuo Xu and Pengyu Cheng and Qizheng Gu and Runjie Zhou and Shaowei Liu and Sihan Cao and Tao Yu and Tianhui Song and Tongtong Bai and Wei Song and Weiran He and Weixiao Huang and Weixin Xu and Xiaokun Yuan and Xingcheng Yao and Xingzhe Wu and Xinxing Zu and Xinyu Zhou and Xinyuan Wang and Y. Charles and Yan Zhong and Yang Li and Yangyang Hu and Yanru Chen and Yejie Wang and Yibo Liu and Yibo Miao and Yidao Qin and Yimin Chen and Yiping Bao and Yiqin Wang and Yongsheng Kang and Yuanxin Liu and Yulun Du and Yuxin Wu and Yuzhi Wang and Yuzi Yan and Zaida Zhou and Zhaowei Li and Zhejun Jiang and Zheng Zhang and Zhilin Yang and Zhiqi Huang and Zihao Huang and Zijia Zhao and Ziwei Chen},
+      year={2025},
+      eprint={2504.07491},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2504.07491}, 
 }
 ```
