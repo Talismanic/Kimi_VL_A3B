@@ -201,13 +201,13 @@ class KimiVLModel(SamplesMixin, Model):
         self.model_path = model_path
         self._custom_system_prompt = system_prompt  # Store custom system prompt if provided
         self._operation = operation
-        self.prompt = prompt
+        self.prompt = prompt + "\n<instruction>"
         
         self.device = get_device()
         logger.info(f"Using device: {self.device}")
 
         # Set dtype for CUDA devices
-        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else None
+        self.torch_dtype = torch.bfloat16 if self.device in ["cuda", "mps"] else None
         # Load model and processor
         logger.info(f"Loading model from {model_path}")
 
@@ -515,7 +515,7 @@ class KimiVLModel(SamplesMixin, Model):
         if sample is not None and self._get_field() is not None:
             field_value = sample.get_field(self._get_field())
             if field_value is not None:
-                self.prompt = str(field_value)
+                self.prompt = str(field_value) + "\n<instruction>"
 
         messages = [
             {"role": "system", "content": self.system_prompt},
