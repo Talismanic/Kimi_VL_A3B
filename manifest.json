@@ -1,0 +1,58 @@
+{
+    "name": "Kimi-VL-A3B",
+    "url": "https://github.com/harpreetsahota204/Kimi-VL-A3B",
+    "models": [
+        {
+            "base_name": "moonshotai/Kimi-VL-A3B-Instruct",
+            "base_filename":"moonshotai/Kimi-VL-A3B-Instruct",
+            "author": "Moonshot AI",
+            "license": "MIT license",
+            "source": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Instruct",
+            "description": "Kimi-VL is an efficient open-source Mixture-of-Experts (MoE) vision-language model (VLM) that offers advanced multimodal reasoning, long-context understanding, and strong agent capabilities—all while activating only 2.8B parameters in its language decoder",
+            "tags": [
+                "agentic",
+                "detection",
+                "ocr",
+                "VLM",
+                "classification",
+                "zero-shot"
+            ],
+            "date_added": "2025-04-16",
+            "requirements": {
+                "packages": ["huggingface-hub","transformers", "torch", "torchvision", "accelerate", "tiktoken", "protobuf", "blobfile"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        },
+        {
+            "base_name": "moonshotai/Kimi-VL-A3B-Thinking",
+            "base_filename":"moonshotai/Kimi-VL-A3B-Thinking",
+            "author": "Moonshot AI",
+            "license": "MIT license",
+            "source": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Thinking",
+            "description": "Kimi-VL is an efficient open-source Mixture-of-Experts (MoE) vision-language model (VLM) that offers advanced multimodal reasoning, long-context understanding, and strong agent capabilities—all while activating only 2.8B parameters in its language decoder",
+            "tags": [
+                "agentic",
+                "detection",
+                "segmentation",
+                "ocr",
+                "VLM",
+                "zero-shot"
+            ],
+            "date_added": "2025-04-16",
+            "requirements": {
+                "packages": ["huggingface-hub","transformers", "torch", "torchvision", "accelerate", "tiktoken", "protobuf", "blobfile"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        }
+    ]
+}
