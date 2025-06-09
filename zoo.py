@@ -236,7 +236,15 @@ class KimiVLModel(SamplesMixin, Model):
         )
 
         self.model.eval()
+    @property
+    def needs_fields(self):
+        """A dict mapping model-specific keys to sample field names."""
+        return self._fields
 
+    @needs_fields.setter
+    def needs_fields(self, fields):
+        self._fields = fields
+    
     def _get_field(self):
         if "prompt_field" in self.needs_fields:
             prompt_field = self.needs_fields["prompt_field"]
@@ -611,25 +619,23 @@ class KimiVLModel(SamplesMixin, Model):
         # For VQA and agentic, return the raw text output
         if self.operation in ["vqa", "agentic"]:
             return output_text.strip()
-
         # For other operations, parse JSON and convert to appropriate format
-        parsed_output = self._parse_json(output_text)
-        if not parsed_output:
-            return None
-
-        if self.operation == "detect":
+        elif self.operation == "detect":
+            parsed_output = self._parse_json(output_text)
             return self._to_detections(
                 parsed_output, 
                 image_width=sample.metadata.width, 
                 image_height=sample.metadata.height,
                 image_grid_thw=inputs['image_grid_hws']
                 )
-        
         elif self.operation == "point":
+            parsed_output = self._parse_json(output_text)
             return self._to_keypoints(parsed_output)
         elif self.operation == "classify":
+            parsed_output = self._parse_json(output_text)
             return self._to_classifications(parsed_output)
         elif self.operation == "ocr":
+            parsed_output = self._parse_json(output_text)
             return self._to_ocr_detections(
                 parsed_output, 
                 image_width=sample.metadata.width, 
