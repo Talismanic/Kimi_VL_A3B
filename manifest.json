@@ -15,7 +15,8 @@
                 "ocr",
                 "VLM",
                 "classification",
-                "zero-shot"
+                "zero-shot",
+                "visual-agent"
             ],
             "date_added": "2025-04-16",
             "requirements": {
@@ -41,9 +42,37 @@
                 "segmentation",
                 "ocr",
                 "VLM",
-                "zero-shot"
+                "zero-shot",
+                "visual-agent"
             ],
             "date_added": "2025-04-16",
+            "requirements": {
+                "packages": ["huggingface-hub","transformers", "torch", "torchvision", "accelerate", "tiktoken", "protobuf", "blobfile"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        },
+        {
+            "base_name": "moonshotai/Kimi-VL-A3B-Thinking-2506",
+            "base_filename":"Kimi-VL-A3B-Thinking-2506",
+            "author": "Moonshot AI",
+            "license": "MIT license",
+            "source": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Thinking-2506",
+            "description": "Kimi-VL is an efficient open-source Mixture-of-Experts (MoE) vision-language model (VLM) that offers advanced multimodal reasoning, long-context understanding, and strong agent capabilities—all while activating only 2.8B parameters in its language decoder",
+            "tags": [
+                "agentic",
+                "detection",
+                "segmentation",
+                "ocr",
+                "VLM",
+                "zero-shot",
+                "visual-agent"
+            ],
+            "date_added": "2025-06-23",
             "requirements": {
                 "packages": ["huggingface-hub","transformers", "torch", "torchvision", "accelerate", "tiktoken", "protobuf", "blobfile"],
                 "cpu": {
