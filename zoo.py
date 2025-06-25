@@ -236,6 +236,7 @@ class KimiVLModel(SamplesMixin, Model):
         )
 
         self.model.eval()
+    
     @property
     def needs_fields(self):
         """A dict mapping model-specific keys to sample field names."""
@@ -277,39 +278,62 @@ class KimiVLModel(SamplesMixin, Model):
         self._custom_system_prompt = value
 
     def _parse_json(self, s: str) -> Optional[Dict]:
-        """Parse JSON from model output.
+        """Parse JSON from model output and extract reasoning information.
         
-        The model may return JSON in different formats:
-        1. Raw JSON string
-        2. JSON wrapped in markdown code blocks (```json ... ```)
-        3. Non-JSON string (returns None)
+        This method handles multiple formats of model output:
+        1. Text with ◁think▷ tags containing reasoning
+        2. JSON within markdown code blocks (```json)
+        3. Raw JSON strings
         
         Args:
-            s: String output from the model to parse
-            
+            s: Raw string output from the model containing JSON and possibly reasoning
+                
         Returns:
-            Dict: Parsed JSON dictionary if successful
-            None: If parsing fails or input is invalid
+            Dict: Dictionary containing:
+                - data: The parsed JSON content
+                - reasoning: Text extracted from ◁think▷ tags
+            None: If parsing fails
             Original input: If input is not a string
+        
+        Example input:
+            "◁think▷This image contains a person◁/think▷
+            ```json
+            {"detections": [{"bbox": [0,0,100,100], "label": "person"}]}
+            ```"
         """
-        # Return input directly if not a string
+        # Return non-string inputs as-is
         if not isinstance(s, str):
             return s
-            
-        # Handle JSON wrapped in markdown code blocks
+        
+        # Extract reasoning from between ◁think▷ tags if present
+        reasoning = ""
+        if "◁think▷" in s and "◁/think▷" in s:
+            try:
+                # Split on tags and take content between them
+                reasoning = s.split("◁think▷")[1].split("◁/think▷")[0].strip()
+            except:
+                logger.debug("Failed to extract reasoning from ◁think▷ tags")
+        
+        # Extract JSON content from markdown code blocks if present
         if "```json" in s:
             try:
-                # Extract JSON between ```json and ``` markers
-                s = s.split("```json")[1].split("```")[0].strip()
+                # Split on markdown markers and take JSON content
+                json_str = s.split("```json")[1].split("```")[0].strip()
             except:
-                pass
-        
+                json_str = s
+        else:
+            json_str = s
+            
         # Attempt to parse the JSON string
         try:
-            return json.loads(s)
+            parsed_json = json.loads(json_str)
+            return {
+                "data": parsed_json,  # The actual JSON content
+                "reasoning": reasoning  # The extracted reasoning text
+            }
         except:
-            # Log first 200 chars of failed parse for debugging
-            logger.debug(f"Failed to parse JSON: {s[:200]}")
+            # Log parsing failures for debugging
+            logger.debug(f"Failed to parse JSON: {json_str[:200]}")
             return None
 
     def _to_detections(
@@ -320,24 +344,37 @@ class KimiVLModel(SamplesMixin, Model):
         image_grid_thw: torch.Tensor = None, 
         patch_size: int = 14
     ) -> fo.Detections:
-        """
-        Convert Kimi's bounding boxes to FiftyOne Detections.
+        """Convert bounding boxes to FiftyOne Detections with associated reasoning.
+        
+        Takes detection results and converts them to FiftyOne's format, including:
+        - Coordinate normalization
+        - Label extraction  
+        - Reasoning attachment
         
         Args:
-            boxes: List of dictionaries containing bounding box info
+            boxes: Detection results, either:
+                - List of detection dictionaries
+                - Dictionary containing 'data' and 'reasoning'
             image_width: Width of the original image in pixels
             image_height: Height of the original image in pixels
             image_grid_thw: Optional tensor with processed image grid dimensions
             patch_size: Size of each patch (default 14)
         
         Returns:
-            fo.Detections object with normalized coordinates
+            fo.Detections object with normalized coordinates and reasoning
         """
         detections = []
         
-        # Handle case where boxes is a dictionary - extract list value if present
+        # Extract reasoning if present in dictionary format
+        reasoning = boxes.get("reasoning", "") if isinstance(boxes, dict) else ""
+        
+        # Handle nested dictionary structures
         if isinstance(boxes, dict):
-            boxes = next((v for v in boxes.values() if isinstance(v, list)), boxes)
+            # Try to get data field, fall back to original dict if not found
+            boxes = boxes.get("data", boxes)
+            if isinstance(boxes, dict):
+                # If still a dict, try to find first list value
+                boxes = next((v for v in boxes.values() if isinstance(v, list)), boxes)
         
         # Ensure boxes is a list, even for single box input
         boxes = boxes if isinstance(boxes, list) else [boxes]
@@ -375,12 +412,13 @@ class KimiVLModel(SamplesMixin, Model):
                 detection = fo.Detection(
                     label=str(box.get("label", "object")),
                     bounding_box=[x, y, w, h],
+                    reasoning=reasoning  # Attach reasoning to detection
                 )
                 detections.append(detection)
                 
             except Exception as e:
                 # Optionally log errors
-                print(f"Error processing box {box}: {e}")
+                logger.debug(f"Error processing box {box}: {e}")
                 continue
                 
         return fo.Detections(detections=detections)
@@ -393,23 +431,38 @@ class KimiVLModel(SamplesMixin, Model):
         image_grid_thw: torch.Tensor = None, 
         patch_size: int = 14
     ) -> fo.Detections:
-        """Convert OCR results to FiftyOne Detections.
+        """Convert OCR results to FiftyOne Detections with reasoning.
+        
+        Takes OCR detection results and converts them to FiftyOne's format, including:
+        - Coordinate normalization
+        - Text content preservation
+        - Text type categorization
+        - Reasoning attachment
         
         Args:
-            boxes: List of dictionaries containing OCR detection info
+            boxes: OCR detection results, either:
+                - List of OCR dictionaries
+                - Dictionary containing 'data' and 'reasoning'
             image_width: Width of the original image in pixels
             image_height: Height of the original image in pixels
             image_grid_thw: Optional tensor with processed image grid dimensions
             patch_size: Size of each patch (default 14)
             
         Returns:
-            fo.Detections object containing the OCR annotations with text content
+            fo.Detections object containing the OCR annotations with text content and reasoning
         """
         detections = []
         
-        # Handle case where boxes is a dictionary - extract list value if present
+        # Extract reasoning if present in dictionary format
+        reasoning = boxes.get("reasoning", "") if isinstance(boxes, dict) else ""
+        
+        # Handle nested dictionary structures
         if isinstance(boxes, dict):
-            boxes = next((v for v in boxes.values() if isinstance(v, list)), boxes)
+            # Try to get data field, fall back to original dict if not found
+            boxes = boxes.get("data", boxes)
+            if isinstance(boxes, dict):
+                # If still a dict, try to find first list value (usually "text_detections")
+                boxes = next((v for v in boxes.values() if isinstance(v, list)), boxes)
         
         # Ensure boxes is a list, even for single box input
         boxes = boxes if isinstance(boxes, list) else [boxes]
@@ -418,7 +471,7 @@ class KimiVLModel(SamplesMixin, Model):
         for box in boxes:
             try:
                 # Extract the bounding box coordinates and text content
-                bbox = box.get('bbox')  # [x1,y1,x2,y2] coordinates
+                bbox = box.get('bbox_2d', box.get('bbox', None))
                 text = box.get('text')  # The actual text string
                 text_type = box.get('text_type', 'text')  # Type of text, defaults to 'text'
                 
@@ -453,6 +506,7 @@ class KimiVLModel(SamplesMixin, Model):
                     label=str(text_type),
                     bounding_box=[x, y, w, h],
                     text=str(text),
+                    reasoning=reasoning  # Attach reasoning to detection
                 )
                 detections.append(detection)
                 
@@ -464,42 +518,60 @@ class KimiVLModel(SamplesMixin, Model):
         # Return all detections wrapped in a FiftyOne Detections container
         return fo.Detections(detections=detections)
     
-    def _to_keypoints(self, points: List[Dict]) -> fo.Keypoints:
-        """Convert a list of point dictionaries to FiftyOne Keypoints.
+    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int) -> fo.Keypoints:
+        """Convert keypoint detections to FiftyOne Keypoints with reasoning.
+        
+        Processes keypoint coordinates and normalizes them to [0,1] range while
+        preserving associated labels and reasoning.
         
         Args:
-            points: List of dictionaries containing point information.
-                Each point should have:
-                - 'point_2d': List of [x,y] coordinates in [0,1] range
-                - 'label': String label describing the point
-                
+            points: Keypoint detection results, either:
+                - List of keypoint dictionaries
+                - Dictionary containing 'data' and 'reasoning'
+            image_width: Original image width in pixels
+            image_height: Original image height in pixels
+            
         Returns:
-            fo.Keypoints object containing the keypoint annotations
-        
-        Expected input format:
-        [
-            {"point_2d": [0.1, 0.2], "label": "person's head", "confidence": 0.9},
-            {"point_2d": [0.3, 0.4], "label": "dog's nose"}
-        ]
+            fo.Keypoints object containing the keypoint annotations with reasoning
+            
+        Example input:
+            {
+                "data": [{"point_2d": [100,100], "label": "nose"}],
+                "reasoning": "Identified facial features"
+            }
         """
-        # Initialize empty list to store converted keypoints
         keypoints = []
         
-        # Process each point dictionary from the input list
+        # Extract reasoning if present
+        reasoning = points.get("reasoning", "") if isinstance(points, dict) else ""
+        
+        # Handle nested dictionary structures
+        if isinstance(points, dict):
+            points = points.get("data", points)
+            if isinstance(points, dict):
+                points = next((v for v in points.values() if isinstance(v, list)), points)
+        
+        # Process each keypoint
         for point in points:
             try:
-                # Extract the x,y coordinates from the point_2d field (coordinates should already be normalized to [0,1])
+                # Extract the x,y coordinates from the point_2d field
                 point_2d = point["point_2d"]
                 
                 # If coordinates are PyTorch tensors, convert them to Python floats
                 if torch.is_tensor(point_2d[0]):
                     point_2d = [float(p.cpu()) for p in point_2d]  # Move to CPU and convert to float
                 
+                # Normalize coordinates to [0,1] range
+                normalized_point = [
+                    point_2d[0] / image_width,
+                    point_2d[1] / image_height
+                ]
+                
                 # Create a FiftyOne Keypoint object with label and coordinates
-                # Use .get() with default "point" label in case label field is missing
                 keypoint = fo.Keypoint(
                     label=str(point.get("label", "point")),  # Convert label to string for consistency
-                    points=[point_2d],  # Wrap point_2d in list since Keypoint expects list of points
+                    points=[normalized_point],  # Wrap point_2d in list since Keypoint expects list of points
+                    reasoning=reasoning  # Attach reasoning to keypoint
                 )
                 keypoints.append(keypoint)  # Add the keypoint to our collection
                 
@@ -512,24 +584,35 @@ class KimiVLModel(SamplesMixin, Model):
         return fo.Keypoints(keypoints=keypoints)
 
     def _to_classifications(self, classes: List[Dict]) -> fo.Classifications:
-        """Convert a list of classification dictionaries to FiftyOne Classifications.
+        """Convert classification results to FiftyOne Classifications with reasoning.
+        
+        Processes classification labels and associated reasoning into FiftyOne's format.
         
         Args:
-            classes: List of dictionaries containing classification information.
-                Each dictionary should have:
-                - 'label': String class label
+            classes: Classification results, either:
+                - List of classification dictionaries
+                - Dictionary containing 'data' and 'reasoning'
                 
         Returns:
             fo.Classifications object containing the converted classification 
-            annotations with labels and optional confidence scores
+            annotations with labels, optional confidence scores, and reasoning
             
         Example input:
-            [
-                {"label": "cat",},
-                {"label": "dog"}
-            ]
+            {
+                "data": [{"label": "cat"}, {"label": "animal"}],
+                "reasoning": "Image shows a domestic cat"
+            }
         """
         classifications = []
+        
+        # Extract reasoning if present
+        reasoning = classes.get("reasoning", "") if isinstance(classes, dict) else ""
+        
+        # Handle nested dictionary structures
+        if isinstance(classes, dict):
+            classes = classes.get("data", classes)
+            if isinstance(classes, dict):
+                classes = next((v for v in classes.values() if isinstance(v, list)), classes)
         
         # Process each classification dictionary
         for cls in classes:
@@ -537,6 +620,7 @@ class KimiVLModel(SamplesMixin, Model):
                 # Create Classification object with required label and optional confidence
                 classification = fo.Classification(
                     label=str(cls["label"]),  # Convert label to string for consistency
+                    reasoning=reasoning  # Attach reasoning to classification
                 )
                 classifications.append(classification)
             except Exception as e:
@@ -546,7 +630,6 @@ class KimiVLModel(SamplesMixin, Model):
                 
         # Return Classifications container with all processed results
         return fo.Classifications(classifications=classifications)
-
 
     def _predict(self, image: Image.Image, sample=None) -> Union[fo.Detections, fo.Keypoints, fo.Classifications, str]:
         """Process a single image through the model and return predictions.
@@ -636,6 +719,9 @@ class KimiVLModel(SamplesMixin, Model):
             skip_special_tokens=True, 
             clean_up_tokenization_spaces=False)[0]
 
+        # Get image dimensions from PIL image
+        image_width, image_height = image.size
+
         # For VQA and agentic, return the raw text output
         if self.operation in ["vqa", "agentic"]:
             return output_text.strip()
@@ -644,13 +730,13 @@ class KimiVLModel(SamplesMixin, Model):
             parsed_output = self._parse_json(output_text)
             return self._to_detections(
                 parsed_output, 
-                image_width=image.width,
-                image_height=image.height,
+                image_width=image_width, 
+                image_height=image_height,
                 image_grid_thw=inputs['image_grid_hws']
                 )
         elif self.operation == "point":
             parsed_output = self._parse_json(output_text)
-            return self._to_keypoints(parsed_output)
+            return self._to_keypoints(parsed_output, image_width, image_height)
         elif self.operation == "classify":
             parsed_output = self._parse_json(output_text)
             return self._to_classifications(parsed_output)
@@ -658,8 +744,8 @@ class KimiVLModel(SamplesMixin, Model):
             parsed_output = self._parse_json(output_text)
             return self._to_ocr_detections(
                 parsed_output, 
-                image_width=image.width,
-                image_height=image.height,
+                image_width=image_width, 
+                image_height=image_height,
                 image_grid_thw=inputs['image_grid_hws']
                 )
 
