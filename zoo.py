@@ -644,8 +644,8 @@ class KimiVLModel(SamplesMixin, Model):
             parsed_output = self._parse_json(output_text)
             return self._to_detections(
                 parsed_output, 
-                image_width=sample.metadata.width, 
-                image_height=sample.metadata.height,
+                image_width=image.width,
+                image_height=image.height,
                 image_grid_thw=inputs['image_grid_hws']
                 )
         elif self.operation == "point":
@@ -658,8 +658,8 @@ class KimiVLModel(SamplesMixin, Model):
             parsed_output = self._parse_json(output_text)
             return self._to_ocr_detections(
                 parsed_output, 
-                image_width=sample.metadata.width, 
-                image_height=sample.metadata.height,
+                image_width=image.width,
+                image_height=image.height,
                 image_grid_thw=inputs['image_grid_hws']
                 )
 
