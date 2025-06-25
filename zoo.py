@@ -12,6 +12,7 @@ import fiftyone as fo
 from fiftyone import Model, SamplesMixin
 
 from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers.utils import is_flash_attn_2_available
 
 logger = logging.getLogger(__name__)
 
@@ -206,27 +207,26 @@ class KimiVLModel(SamplesMixin, Model):
         self.device = get_device()
         logger.info(f"Using device: {self.device}")
 
-        # Set dtype for CUDA devices
-        self.torch_dtype = torch.bfloat16 if self.device == "cuda" else None
+        model_kwargs = {
+            "device_map":self.device,
+            }
+
+        if is_flash_attn_2_available():
+            model_kwargs["attn_implementation"] = "flash_attention_2"
+
+        # Only set specific torch_dtype for CUDA devices
+        if self.device == "cuda":
+            model_kwargs["torch_dtype"] = torch.bfloat16
+
         # Load model and processor
         logger.info(f"Loading model from {model_path}")
 
-        if self.torch_dtype:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                trust_remote_code=True,
-                # local_files_only=True,
-                device_map=self.device,
-                torch_dtype=self.torch_dtype
-            )
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                trust_remote_code=True,
-                # local_files_only=True,
-                device_map=self.device,
-            )
-        
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            **model_kwargs
+        )
+
         logger.info("Loading processor")
         self.processor = AutoProcessor.from_pretrained(
             model_path,
@@ -570,18 +570,38 @@ class KimiVLModel(SamplesMixin, Model):
         Raises:
             ValueError: If no prompt has been set
         """
+        # Use local prompt variable instead of modifying self.prompt
+        prompt = self.prompt  # Start with instance default
+        
         if sample is not None and self._get_field() is not None:
             field_value = sample.get_field(self._get_field())
             if field_value is not None:
-                self.prompt = str(field_value)
-
+                prompt = str(field_value)  # Local variable, doesn't affect instance
+        
+        if not prompt:
+            raise ValueError("No prompt provided.")
+        
         messages = [
-            {"role": "system", "content": self.system_prompt},
             {
-                "role": "user",
+                "role": "system", 
+                "content": [  
+                    {
+                        "type": "text",
+                        "text": self.system_prompt
+                    }
+                ]
+            },
+            {
+                "role": "user", 
                 "content": [
-                    {"type": "text", "text": self.prompt},
-                    {"image": sample.filepath if sample else None}
+                    {
+                        "type": "image", 
+                        "image": sample.filepath if sample else image
+                    },
+                    {
+                        "type": "text", 
+                        "text": prompt
+                    },
                 ]
             }
         ]
