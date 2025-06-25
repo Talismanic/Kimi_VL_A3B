@@ -516,7 +516,7 @@ class KimiVLModel(SamplesMixin, Model):
         # Return all detections wrapped in a FiftyOne Detections container
         return fo.Detections(detections=detections)
     
-    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int) -> fo.Keypoints:
+    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int, image_grid_thw: torch.Tensor = None, patch_size: int = 14) -> fo.Keypoints:
         """Convert keypoint detections to FiftyOne Keypoints with reasoning.
         
         Processes keypoint coordinates and normalizes them to [0,1] range while
@@ -528,6 +528,8 @@ class KimiVLModel(SamplesMixin, Model):
                 - Dictionary containing 'data' and 'reasoning'
             image_width: Original image width in pixels
             image_height: Original image height in pixels
+            image_grid_thw: Optional tensor with processed image grid dimensions
+            patch_size: Size of each patch (default 14)
             
         Returns:
             fo.Keypoints object containing the keypoint annotations with reasoning
@@ -558,6 +560,19 @@ class KimiVLModel(SamplesMixin, Model):
                 # If coordinates are PyTorch tensors, convert them to Python floats
                 if torch.is_tensor(point_2d[0]):
                     point_2d = [float(p.cpu()) for p in point_2d]  # Move to CPU and convert to float
+                
+                # If image_grid_thw is provided, convert normalized coords to pixel coords
+                if image_grid_thw is not None:
+                    # Extract grid dimensions (THW order)
+                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
+                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
+                    
+                    # Convert normalized coordinates to pixel coordinates
+                    x = point_2d[0] * proc_width
+                    y = point_2d[1] * proc_height
+                    
+                    # Update point_2d to pixel coordinates for normalization
+                    point_2d = [x, y]
                 
                 # Normalize coordinates to [0,1] range
                 normalized_point = [
@@ -629,80 +644,94 @@ class KimiVLModel(SamplesMixin, Model):
         # Return Classifications container with all processed results
         return fo.Classifications(classifications=classifications)
     
-    def _to_agentic_keypoints(self, output_text: str, image_width: int, image_height: int) -> fo.Keypoints:
-            """Convert agentic PyAutoGUI code to FiftyOne Keypoints.
+    def _to_agentic_keypoints(self, output_text: str, image_width: int, image_height: int, image_grid_thw: torch.Tensor = None, patch_size: int = 14) -> fo.Keypoints:
+        """Convert agentic PyAutoGUI code to FiftyOne Keypoints.
+        
+        Parses PyAutoGUI code snippets to extract coordinates and creates keypoints
+        with the full code as the label.
+        
+        Args:
+            output_text: Raw output text containing PyAutoGUI code and possibly reasoning
+            image_width: Original image width in pixels
+            image_height: Original image height in pixels
+            image_grid_thw: Optional tensor with processed image grid dimensions
+            patch_size: Size of each patch (default 14)
             
-            Parses PyAutoGUI code snippets to extract coordinates and creates keypoints
-            with the full code as the label.
+        Returns:
+            fo.Keypoints object containing the agentic action keypoints
             
-            Args:
-                output_text: Raw output text containing PyAutoGUI code and possibly reasoning
-                image_width: Original image width in pixels
-                image_height: Original image height in pixels
+        Example input:
+            "◁think▷I need to click the login button◁/think▷
+            ```python
+            pyautogui.click(x=0.972, y=0.186)
+            ```"
+        """
+        import re
+        
+        keypoints = []
+        
+        # Extract reasoning if present
+        reasoning = ""
+        if "◁think▷" in output_text and "◁/think▷" in output_text:
+            try:
+                reasoning = output_text.split("◁think▷")[1].split("◁/think▷")[0].strip()
+            except:
+                logger.debug("Failed to extract reasoning from ◁think▷ tags")
+        
+        # Extract Python code blocks
+        python_blocks = []
+        if "```python" in output_text:
+            # Find all python code blocks
+            pattern = r'```python\n(.*?)\n```'
+            matches = re.findall(pattern, output_text, re.DOTALL)
+            python_blocks.extend(matches)
+        
+        # Process each code block to find coordinates
+        for code_block in python_blocks:
+            try:
+                # Look for pyautogui commands with x, y coordinates
+                # Patterns to match: pyautogui.click(x=0.972, y=0.186) or pyautogui.click(0.972, 0.186)
+                coord_patterns = [
+                    r'pyautogui\.\w+\([^)]*x\s*=\s*([\d.]+)[^)]*y\s*=\s*([\d.]+)[^)]*\)',
+                    r'pyautogui\.\w+\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)',
+                ]
                 
-            Returns:
-                fo.Keypoints object containing the agentic action keypoints
-                
-            Example input:
-                "◁think▷I need to click the login button◁/think▷
-                ```python
-                pyautogui.click(x=0.972, y=0.186)
-                ```"
-            """
-            keypoints = []
-            
-            # Extract reasoning if present
-            reasoning = ""
-            if "◁think▷" in output_text and "◁/think▷" in output_text:
-                try:
-                    reasoning = output_text.split("◁think▷")[1].split("◁/think▷")[0].strip()
-                except:
-                    logger.debug("Failed to extract reasoning from ◁think▷ tags")
-            
-            # Extract Python code blocks
-            python_blocks = []
-            if "```python" in output_text:
-                # Find all python code blocks
-                pattern = r'```python\n(.*?)\n```'
-                matches = re.findall(pattern, output_text, re.DOTALL)
-                python_blocks.extend(matches)
-            
-            # Process each code block to find coordinates
-            for code_block in python_blocks:
-                try:
-                    # Look for pyautogui commands with x, y coordinates
-                    # Patterns to match: pyautogui.click(x=0.972, y=0.186) or pyautogui.click(0.972, 0.186)
-                    coord_patterns = [
-                        r'pyautogui\.\w+\([^)]*x\s*=\s*([\d.]+)[^)]*y\s*=\s*([\d.]+)[^)]*\)',
-                        r'pyautogui\.\w+\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)',
-                    ]
-                    
-                    for pattern in coord_patterns:
-                        matches = re.findall(pattern, code_block)
-                        for match in matches:
-                            x_coord, y_coord = map(float, match)
+                for pattern in coord_patterns:
+                    matches = re.findall(pattern, code_block)
+                    for match in matches:
+                        x_coord, y_coord = map(float, match)
+                        
+                        # If image_grid_thw is provided, convert normalized coords to pixel coords
+                        if image_grid_thw is not None:
+                            # Extract grid dimensions (THW order)
+                            proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
+                            proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
                             
-                            # Check if coordinates are normalized (0-1) or absolute pixels
-                            if x_coord <= 1.0 and y_coord <= 1.0:
-                                # Already normalized
-                                normalized_point = [x_coord, y_coord]
-                            else:
-                                # Convert from pixel coordinates to normalized
-                                normalized_point = [x_coord / image_width, y_coord / image_height]
-                            
-                            # Create keypoint with the full code block as label
-                            keypoint = fo.Keypoint(
-                                label=code_block.strip(),
-                                points=[normalized_point],
-                                reasoning=reasoning
-                            )
-                            keypoints.append(keypoint)
-                            
-                except Exception as e:
-                    logger.debug(f"Error processing code block {code_block}: {e}")
-                    continue
-            
-            return fo.Keypoints(keypoints=keypoints)
+                            # Convert normalized coordinates to pixel coordinates
+                            x_coord = x_coord * proc_width
+                            y_coord = y_coord * proc_height
+                        
+                        # Check if coordinates need normalization (if they're > 1, they're likely pixel coords)
+                        if x_coord > 1.0 or y_coord > 1.0:
+                            # Convert from pixel coordinates to normalized
+                            normalized_point = [x_coord / image_width, y_coord / image_height]
+                        else:
+                            # Already normalized or very small coordinates
+                            normalized_point = [x_coord, y_coord]
+                        
+                        # Create keypoint with the full code block as label
+                        keypoint = fo.Keypoint(
+                            label=code_block.strip(),
+                            points=[normalized_point],
+                            reasoning=reasoning
+                        )
+                        keypoints.append(keypoint)
+                        
+            except Exception as e:
+                logger.debug(f"Error processing code block {code_block}: {e}")
+                continue
+        
+        return fo.Keypoints(keypoints=keypoints)
 
 
     def _predict(self, image: Image.Image, sample=None) -> Union[fo.Detections, fo.Keypoints, fo.Classifications, str]:
@@ -801,7 +830,7 @@ class KimiVLModel(SamplesMixin, Model):
             return output_text.strip()
         # For agentic, parse PyAutoGUI code and convert to keypoints
         elif self.operation == "agentic":
-            return self._to_agentic_keypoints(output_text, image_width, image_height)
+            return self._to_agentic_keypoints(output_text, image_width, image_height, inputs['image_grid_hws'])
         elif self.operation == "detect":
             parsed_output = self._parse_json(output_text)
             return self._to_detections(
@@ -812,7 +841,7 @@ class KimiVLModel(SamplesMixin, Model):
                 )
         elif self.operation == "point":
             parsed_output = self._parse_json(output_text)
-            return self._to_keypoints(parsed_output, image_width, image_height)
+            return self._to_keypoints(parsed_output, image_width, image_height, inputs['image_grid_hws'])
         elif self.operation == "classify":
             parsed_output = self._parse_json(output_text)
             return self._to_classifications(parsed_output)
