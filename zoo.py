@@ -16,9 +16,9 @@ from transformers.utils import is_flash_attn_2_available
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant. The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions, which will request that you detect both primary elements and their associated components. 
+DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant. You specialize in detecting and localizating meaningful visual elements. 
 
-You specialize in detection and localization of any meaningful visual elements. You can identify and localize objects, components, people, places, things, and UI elements in images.
+You can detect and localize objects, components, people, places, things, and UI elements in images using 2D bound boxes.
 
 Always return your response as valid JSON wrapped in ```json blocks.
 
@@ -26,12 +26,12 @@ Always return your response as valid JSON wrapped in ```json blocks.
 {
     "detections": [
         {
-            "bbox": [x1, y1, x2, y2],
-            "label": "descriptive label for the action that can be taken or object detected"
+            "bbox_2d": [x1, y1, x2, y2],
+            "label": "descriptive label for the bounding box"
         },
         {
             "bbox_2d": [x1, y1, x2, y2],
-            "label": "descriptive label for the action that can be taken or object detected"
+            "label": "descriptive label for the bounding box"
         }
     ]
 }
@@ -40,23 +40,21 @@ Always return your response as valid JSON wrapped in ```json blocks.
 The JSON should contain bounding boxes in pixel coordinates [x1,y1,x2,y2] format, where:
 - x1,y1 is the top-left corner
 - x2,y2 is the bottom-right corner
-- Use descriptive, context-specific labels. 
-- Each detection should have a 'bbox' (or 'bbox_2d') and optional 'label' field
-- The 'label' field should be a string describing the detected object or action
-- Once something has been localized, do not localize it again and move on to the the next object
+- Provide specific, descriptive labels for each detected element
+- Include all relevant elements that match the user's request
+- For UI elements, include their function when possible (e.g., "Login Button" rather than just "Button")
+- If many similar elements exist, prioritize the most prominent or relevant ones
 
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and do what they tell you to.
+The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and detect.
+
+Think step by step.
 """
 
 DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant. You specialize in key point detection across any visual domain. A key point represents the center of any meaningful visual element. 
 
 Key points should adapt to the context (physical world, digital interfaces, UI elements, etc.) while maintaining consistent accuracy and relevance. 
 
-For each key point:
-1. Identify the key point and provide a contextually appropriate label
-2. Locate the center of the key point 
-
-Always return your response as valid JSON wrapped in ```json blocks.
+For each key point identify the key point and provide a contextually appropriate label and always return your response as valid JSON wrapped in ```json blocks.
 
 ```json
 {
@@ -70,13 +68,14 @@ Always return your response as valid JSON wrapped in ```json blocks.
 ```
 
 The JSON should contain points in pixel coordinates [x,y] format, where:
-- x is the horizontal coordinate from left edge
-- y is the vertical coordinate from top edge
-- Each point must have a 'point_2d' field with [x,y] coordinates
-- Each point should have a descriptive 'label' field of what the point represents
-- Once something has been pointed, do not point at it again and move on to the the next object
+- x is the horizontal center coordinate of the visual element
+- y is the vertical center coordinate of the visual element
+- Include all relevant elements that match the user's request
+- You can point to multiple visual elements
 
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and do what they tell you to.
+The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and point.
+
+Think step by step
 """
 
 DEFAULT_CLASSIFICATION_SYSTEM_PROMPT = """You are a helpful assistant. You specializes in comprehensive classification across any visual domain, capable of analyzing:
@@ -99,12 +98,11 @@ The JSON should contain a list of classifications where:
 - Each classification must have a 'label' field
 - Labels should be descriptive strings describing what you've identified in the image
 - The response should be a list of classifications
-- Once you have determined a classification, do not repeat it and move on to the next classification
 
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and do what they tell you to.
+Think step by step
 """
    
-DEFAULT_OCR_SYSTEM_PROMPT = """You are a helpful assistant specializing in text detection and recognition (OCR) in images. Your task is to locate and read text from any visual content, including documents, UI elements, signs, or any other text-containing regions.
+DEFAULT_OCR_SYSTEM_PROMPT = """You are a helpful assistant specializing in text detection and recognition (OCR) in images. Your can read, detect, and locate text from any visual content, including documents, UI elements, signs, or any other text-containing regions.
 
 Always return your response as valid JSON wrapped in ```json blocks.
 
@@ -112,9 +110,9 @@ Always return your response as valid JSON wrapped in ```json blocks.
 {
     "text_detections": [
         {
-            "bbox": [x1, y1, x2, y2],
-            "text": "exact text content found in this region",
-            "text_type": "the text region category based on the document, including but not limited to: title, abstract, heading, paragraph, button, link, label, icon, menu item, etc.",
+            "bbox_2d": [x1, y1, x2, y2],  // Coordinates: [top-left x, top-left y, bottom-right x, bottom-right y]
+            "text_type": "title|abstract|heading|paragraph|button|link|label|title|menu_item|input_field|icon|list_item|etc.",  // Select appropriate text category
+            "text": "Exact text content found in this region"  // Transcribe text exactly as it appears
         }
     ]
 }
@@ -123,12 +121,12 @@ Always return your response as valid JSON wrapped in ```json blocks.
 The JSON should contain bounding boxes in pixel coordinates [x1,y1,x2,y2] format, where:
 - x1,y1 is the top-left corner
 - x2,y2 is the bottom-right corner
-- All coordinates are in absolute pixel values
-- text_type is the text region category based on the document, including but not limited to: title, abstract, heading, paragraph, button, link, label, icon, menu item, etc.
-- The 'text' field should be a string containing the exact text content found in the region preserving:
-  - Case sensitivity
-  - Numbers and special characters
-  - Line breaks (if present)
+- 'text_type' is important to get right, it's the text region category based on the document, including but not limited to: title, abstract, heading, paragraph, button, link, label, icon, menu item, etc.
+- The 'text' field should be a string containing the exact text content found in the region
+
+The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's perform the OCR detections.
+
+Think step by step
 """
 
 DEFAULT_VQA_SYSTEM_PROMPT = "You are a helpful assistant. You provide clear and concise answerss to questions about images. Report answers in natural language text in English."
@@ -691,7 +689,6 @@ class KimiVLModel(SamplesMixin, Model):
 
         text = self.processor.apply_chat_template(
             messages, 
-            tokenize=False, 
             add_generation_prompt=True
             )
         
@@ -699,6 +696,7 @@ class KimiVLModel(SamplesMixin, Model):
             text=[text], 
             images=[image], 
             padding=True, 
+            truncation=True,
             return_tensors="pt").to(self.device)
         
         # Set recommended temperature based on model type per the model card
