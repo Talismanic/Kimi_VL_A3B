@@ -1,5 +1,5 @@
-
 import os
+import re
 import logging
 import json
 from PIL import Image
@@ -165,7 +165,7 @@ Screen:
 - locateOnScreen('image.png')
 - center(box)     # Get center of a region
 
-Please observe the screenshot, and return the command which fulfils the user's request.
+Please observe the screenshot, please locate the following elements with action and point.<instruction> 
 """
 
 OPERATIONS = {
@@ -628,6 +628,82 @@ class KimiVLModel(SamplesMixin, Model):
                 
         # Return Classifications container with all processed results
         return fo.Classifications(classifications=classifications)
+    
+    def _to_agentic_keypoints(self, output_text: str, image_width: int, image_height: int) -> fo.Keypoints:
+            """Convert agentic PyAutoGUI code to FiftyOne Keypoints.
+            
+            Parses PyAutoGUI code snippets to extract coordinates and creates keypoints
+            with the full code as the label.
+            
+            Args:
+                output_text: Raw output text containing PyAutoGUI code and possibly reasoning
+                image_width: Original image width in pixels
+                image_height: Original image height in pixels
+                
+            Returns:
+                fo.Keypoints object containing the agentic action keypoints
+                
+            Example input:
+                "◁think▷I need to click the login button◁/think▷
+                ```python
+                pyautogui.click(x=0.972, y=0.186)
+                ```"
+            """
+            keypoints = []
+            
+            # Extract reasoning if present
+            reasoning = ""
+            if "◁think▷" in output_text and "◁/think▷" in output_text:
+                try:
+                    reasoning = output_text.split("◁think▷")[1].split("◁/think▷")[0].strip()
+                except:
+                    logger.debug("Failed to extract reasoning from ◁think▷ tags")
+            
+            # Extract Python code blocks
+            python_blocks = []
+            if "```python" in output_text:
+                # Find all python code blocks
+                pattern = r'```python\n(.*?)\n```'
+                matches = re.findall(pattern, output_text, re.DOTALL)
+                python_blocks.extend(matches)
+            
+            # Process each code block to find coordinates
+            for code_block in python_blocks:
+                try:
+                    # Look for pyautogui commands with x, y coordinates
+                    # Patterns to match: pyautogui.click(x=0.972, y=0.186) or pyautogui.click(0.972, 0.186)
+                    coord_patterns = [
+                        r'pyautogui\.\w+\([^)]*x\s*=\s*([\d.]+)[^)]*y\s*=\s*([\d.]+)[^)]*\)',
+                        r'pyautogui\.\w+\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)',
+                    ]
+                    
+                    for pattern in coord_patterns:
+                        matches = re.findall(pattern, code_block)
+                        for match in matches:
+                            x_coord, y_coord = map(float, match)
+                            
+                            # Check if coordinates are normalized (0-1) or absolute pixels
+                            if x_coord <= 1.0 and y_coord <= 1.0:
+                                # Already normalized
+                                normalized_point = [x_coord, y_coord]
+                            else:
+                                # Convert from pixel coordinates to normalized
+                                normalized_point = [x_coord / image_width, y_coord / image_height]
+                            
+                            # Create keypoint with the full code block as label
+                            keypoint = fo.Keypoint(
+                                label=code_block.strip(),
+                                points=[normalized_point],
+                                reasoning=reasoning
+                            )
+                            keypoints.append(keypoint)
+                            
+                except Exception as e:
+                    logger.debug(f"Error processing code block {code_block}: {e}")
+                    continue
+            
+            return fo.Keypoints(keypoints=keypoints)
+
 
     def _predict(self, image: Image.Image, sample=None) -> Union[fo.Detections, fo.Keypoints, fo.Classifications, str]:
         """Process a single image through the model and return predictions.
@@ -720,10 +796,12 @@ class KimiVLModel(SamplesMixin, Model):
         # Get image dimensions from PIL image
         image_width, image_height = image.size
 
-        # For VQA and agentic, return the raw text output
-        if self.operation in ["vqa", "agentic"]:
+        # For VQA, return the raw text output
+        if self.operation == "vqa":
             return output_text.strip()
-        # For other operations, parse JSON and convert to appropriate format
+        # For agentic, parse PyAutoGUI code and convert to keypoints
+        elif self.operation == "agentic":
+            return self._to_agentic_keypoints(output_text, image_width, image_height)
         elif self.operation == "detect":
             parsed_output = self._parse_json(output_text)
             return self._to_detections(
