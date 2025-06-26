@@ -338,14 +338,12 @@ class KimiVLModel(SamplesMixin, Model):
         self, 
         boxes: List[Dict], 
         image_width: int, 
-        image_height: int, 
-        image_grid_thw: torch.Tensor = None, 
-        patch_size: int = 14
+        image_height: int
     ) -> fo.Detections:
         """Convert bounding boxes to FiftyOne Detections with associated reasoning.
         
         Takes detection results and converts them to FiftyOne's format, including:
-        - Coordinate normalization
+        - Coordinate normalization (coordinates are already normalized 0-1)
         - Label extraction  
         - Reasoning attachment
         
@@ -355,8 +353,6 @@ class KimiVLModel(SamplesMixin, Model):
                 - Dictionary containing 'data' and 'reasoning'
             image_width: Width of the original image in pixels
             image_height: Height of the original image in pixels
-            image_grid_thw: Optional tensor with processed image grid dimensions
-            patch_size: Size of each patch (default 14)
         
         Returns:
             fo.Detections object with normalized coordinates and reasoning
@@ -384,27 +380,14 @@ class KimiVLModel(SamplesMixin, Model):
                 if not bbox:
                     continue
                 
-                # If image_grid_thw is provided, convert normalized coords to pixel coords
-                if image_grid_thw is not None:
-                    # Extract grid dimensions (THW order)
-                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
-                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
-                    
-                    # Convert normalized coordinates to pixel coordinates
-                    x1 = bbox[0] * proc_width
-                    y1 = bbox[1] * proc_height
-                    x2 = bbox[2] * proc_width
-                    y2 = bbox[3] * proc_height
-                    
-                    # Update bbox to pixel coordinates for conversion
-                    bbox = [x1, y1, x2, y2]
-                
-                # Convert pixel coordinates to normalized [0,1] coordinates
+                # Coordinates are already normalized [0,1] relative to original image
                 x1, y1, x2, y2 = map(float, bbox)
-                x = x1 / image_width  # Normalized left x
-                y = y1 / image_height # Normalized top y
-                w = (x2 - x1) / image_width  # Normalized width
-                h = (y2 - y1) / image_height # Normalized height
+                
+                # Convert to FiftyOne format: [x, y, width, height]
+                x = x1  # Left coordinate (already normalized)
+                y = y1  # Top coordinate (already normalized) 
+                w = x2 - x1  # Width (already normalized)
+                h = y2 - y1  # Height (already normalized)
                 
                 # Create Detection object with normalized coordinates
                 detection = fo.Detection(
@@ -425,14 +408,12 @@ class KimiVLModel(SamplesMixin, Model):
         self, 
         boxes: List[Dict], 
         image_width: int, 
-        image_height: int, 
-        image_grid_thw: torch.Tensor = None, 
-        patch_size: int = 14
+        image_height: int
     ) -> fo.Detections:
         """Convert OCR results to FiftyOne Detections with reasoning.
         
         Takes OCR detection results and converts them to FiftyOne's format, including:
-        - Coordinate normalization
+        - Coordinate normalization (coordinates are already normalized 0-1)
         - Text content preservation
         - Text type categorization
         - Reasoning attachment
@@ -443,8 +424,6 @@ class KimiVLModel(SamplesMixin, Model):
                 - Dictionary containing 'data' and 'reasoning'
             image_width: Width of the original image in pixels
             image_height: Height of the original image in pixels
-            image_grid_thw: Optional tensor with processed image grid dimensions
-            patch_size: Size of each patch (default 14)
             
         Returns:
             fo.Detections object containing the OCR annotations with text content and reasoning
@@ -477,27 +456,14 @@ class KimiVLModel(SamplesMixin, Model):
                 if not bbox or not text:
                     continue
                 
-                # If image_grid_thw is provided, convert normalized coords to pixel coords
-                if image_grid_thw is not None:
-                    # Extract grid dimensions (THW order)
-                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
-                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
-                    
-                    # Convert normalized coordinates to pixel coordinates
-                    x1 = bbox[0] * proc_width
-                    y1 = bbox[1] * proc_height
-                    x2 = bbox[2] * proc_width
-                    y2 = bbox[3] * proc_height
-                    
-                    # Update bbox to pixel coordinates for conversion
-                    bbox = [x1, y1, x2, y2]
-                
-                # Convert pixel coordinates to normalized [0,1] coordinates
+                # Coordinates are already normalized [0,1] relative to original image
                 x1, y1, x2, y2 = map(float, bbox)
-                x = x1 / image_width  # Normalized left x
-                y = y1 / image_height # Normalized top y
-                w = (x2 - x1) / image_width  # Normalized width
-                h = (y2 - y1) / image_height # Normalized height
+                
+                # Convert to FiftyOne format: [x, y, width, height]
+                x = x1  # Left coordinate (already normalized)
+                y = y1  # Top coordinate (already normalized)
+                w = x2 - x1  # Width (already normalized)
+                h = y2 - y1  # Height (already normalized)
                 
                 # Create Detection object with normalized coordinates
                 detection = fo.Detection(
@@ -516,11 +482,11 @@ class KimiVLModel(SamplesMixin, Model):
         # Return all detections wrapped in a FiftyOne Detections container
         return fo.Detections(detections=detections)
     
-    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int, image_grid_thw: torch.Tensor = None, patch_size: int = 14) -> fo.Keypoints:
+    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int) -> fo.Keypoints:
         """Convert keypoint detections to FiftyOne Keypoints with reasoning.
         
-        Processes keypoint coordinates and normalizes them to [0,1] range while
-        preserving associated labels and reasoning.
+        Processes keypoint coordinates that are already normalized to [0,1] range
+        while preserving associated labels and reasoning.
         
         Args:
             points: Keypoint detection results, either:
@@ -528,15 +494,13 @@ class KimiVLModel(SamplesMixin, Model):
                 - Dictionary containing 'data' and 'reasoning'
             image_width: Original image width in pixels
             image_height: Original image height in pixels
-            image_grid_thw: Optional tensor with processed image grid dimensions
-            patch_size: Size of each patch (default 14)
             
         Returns:
             fo.Keypoints object containing the keypoint annotations with reasoning
             
         Example input:
             {
-                "data": [{"point_2d": [100,100], "label": "nose"}],
+                "data": [{"point_2d": [0.5, 0.3], "label": "nose"}],
                 "reasoning": "Identified facial features"
             }
         """
@@ -561,24 +525,8 @@ class KimiVLModel(SamplesMixin, Model):
                 if torch.is_tensor(point_2d[0]):
                     point_2d = [float(p.cpu()) for p in point_2d]  # Move to CPU and convert to float
                 
-                # If image_grid_thw is provided, convert normalized coords to pixel coords
-                if image_grid_thw is not None:
-                    # Extract grid dimensions (THW order)
-                    proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
-                    proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
-                    
-                    # Convert normalized coordinates to pixel coordinates
-                    x = point_2d[0] * proc_width
-                    y = point_2d[1] * proc_height
-                    
-                    # Update point_2d to pixel coordinates for normalization
-                    point_2d = [x, y]
-                
-                # Normalize coordinates to [0,1] range
-                normalized_point = [
-                    point_2d[0] / image_width,
-                    point_2d[1] / image_height
-                ]
+                # Coordinates are already normalized [0,1] relative to original image
+                normalized_point = [float(point_2d[0]), float(point_2d[1])]
                 
                 # Create a FiftyOne Keypoint object with label and coordinates
                 keypoint = fo.Keypoint(
@@ -643,19 +591,17 @@ class KimiVLModel(SamplesMixin, Model):
                 
         # Return Classifications container with all processed results
         return fo.Classifications(classifications=classifications)
-    
-    def _to_agentic_keypoints(self, output_text: str, image_width: int, image_height: int, image_grid_thw: torch.Tensor = None, patch_size: int = 14) -> fo.Keypoints:
+
+    def _to_agentic_keypoints(self, output_text: str, image_width: int, image_height: int) -> fo.Keypoints:
         """Convert agentic PyAutoGUI code to FiftyOne Keypoints.
         
         Parses PyAutoGUI code snippets to extract coordinates and creates keypoints
-        with the full code as the label.
+        with the full code as the label. Coordinates are already normalized [0,1].
         
         Args:
             output_text: Raw output text containing PyAutoGUI code and possibly reasoning
-            image_width: Original image width in pixels
+            image_width: Original image width in pixels  
             image_height: Original image height in pixels
-            image_grid_thw: Optional tensor with processed image grid dimensions
-            patch_size: Size of each patch (default 14)
             
         Returns:
             fo.Keypoints object containing the agentic action keypoints
@@ -701,23 +647,8 @@ class KimiVLModel(SamplesMixin, Model):
                     for match in matches:
                         x_coord, y_coord = map(float, match)
                         
-                        # If image_grid_thw is provided, convert normalized coords to pixel coords
-                        if image_grid_thw is not None:
-                            # Extract grid dimensions (THW order)
-                            proc_height = float(image_grid_thw[0][0].cpu() * patch_size)
-                            proc_width = float(image_grid_thw[0][1].cpu() * patch_size)
-                            
-                            # Convert normalized coordinates to pixel coordinates
-                            x_coord = x_coord * proc_width
-                            y_coord = y_coord * proc_height
-                        
-                        # Check if coordinates need normalization (if they're > 1, they're likely pixel coords)
-                        if x_coord > 1.0 or y_coord > 1.0:
-                            # Convert from pixel coordinates to normalized
-                            normalized_point = [x_coord / image_width, y_coord / image_height]
-                        else:
-                            # Already normalized or very small coordinates
-                            normalized_point = [x_coord, y_coord]
+                        # Coordinates are already normalized [0,1] relative to original image
+                        normalized_point = [x_coord, y_coord]
                         
                         # Create keypoint with the full code block as label
                         keypoint = fo.Keypoint(
@@ -732,7 +663,6 @@ class KimiVLModel(SamplesMixin, Model):
                 continue
         
         return fo.Keypoints(keypoints=keypoints)
-
 
     def _predict(self, image: Image.Image, sample=None) -> Union[fo.Detections, fo.Keypoints, fo.Classifications, str]:
         """Process a single image through the model and return predictions.
@@ -794,6 +724,7 @@ class KimiVLModel(SamplesMixin, Model):
 
         text = self.processor.apply_chat_template(
             messages, 
+            tokenize=False, 
             add_generation_prompt=True
             )
         
@@ -801,7 +732,6 @@ class KimiVLModel(SamplesMixin, Model):
             text=[text], 
             images=[image], 
             padding=True, 
-            truncation=True,
             return_tensors="pt").to(self.device)
         
         # Set recommended temperature based on model type per the model card
@@ -830,29 +760,20 @@ class KimiVLModel(SamplesMixin, Model):
             return output_text.strip()
         # For agentic, parse PyAutoGUI code and convert to keypoints
         elif self.operation == "agentic":
-            return self._to_agentic_keypoints(output_text, image_width, image_height, inputs['image_grid_hws'])
+            return self._to_agentic_keypoints(output_text, image_width, image_height)
+        # For other operations, parse JSON and convert to appropriate format
         elif self.operation == "detect":
             parsed_output = self._parse_json(output_text)
-            return self._to_detections(
-                parsed_output, 
-                image_width=image_width, 
-                image_height=image_height,
-                image_grid_thw=inputs['image_grid_hws']
-                )
+            return self._to_detections(parsed_output, image_width, image_height)
         elif self.operation == "point":
             parsed_output = self._parse_json(output_text)
-            return self._to_keypoints(parsed_output, image_width, image_height, inputs['image_grid_hws'])
+            return self._to_keypoints(parsed_output, image_width, image_height)
         elif self.operation == "classify":
             parsed_output = self._parse_json(output_text)
             return self._to_classifications(parsed_output)
         elif self.operation == "ocr":
             parsed_output = self._parse_json(output_text)
-            return self._to_ocr_detections(
-                parsed_output, 
-                image_width=image_width, 
-                image_height=image_height,
-                image_grid_thw=inputs['image_grid_hws']
-                )
+            return self._to_ocr_detections(parsed_output, image_width, image_height)
 
     def predict(self, image, sample=None):
         """Process an image with the model.
